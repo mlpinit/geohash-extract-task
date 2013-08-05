@@ -1,0 +1,48 @@
+#!/usr/bin/env ruby
+
+require 'ffi'
+require 'zip/zipfilesystem'
+require 'rgeo/shapefile'
+
+module GeoHash
+  extend FFI::Library
+  ffi_lib 'geohash'
+  attach_function :geohash_encode, [:double, :double, :int], :string
+end
+
+Dir.glob('data/*.zip') do |filename|
+  id = File.basename(filename, ".zip")
+
+  begin
+    Zip::ZipFile.open(filename) do |zipfile|
+
+      shp_file= nil
+
+      zipfile.each do |file|
+        # Normally we would go through each zip'd file and extract it out to a temporary
+        # file so that RGeo::Shapefile::Reader can read it. How can we monkey-patch the File
+        # class so that RGeo::Shapefile::Reader#open will read from the zip'd file?
+
+        # Store the shapefilee basename
+        shp_file= file.name if file.name.split(".").last == ".shp"
+      end
+
+      begin
+
+        # This is where RGeo::Shapefile::Reader#open needs to read from zip file!
+        shapefile = RGeo::Shapefile::Reader.open(shp_file)
+
+        shapefile.each do |record|
+          if record.geometry && record.geometry.geometry_type == RGeo::Feature::Point
+            geohash = GeoHash.geohash_encode(record.geometry.x, record.geometry.y, 10)
+            puts "#{id}\t#{geohash}"
+          end
+        end
+      rescue Exception => e
+        puts "Error: #{e.backtrace.inspect}"
+      end
+    end
+  rescue Zip::ZipError => e
+    # Don't care. Some files aren't zip files.
+  end
+end
